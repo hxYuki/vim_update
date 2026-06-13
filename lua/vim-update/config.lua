@@ -18,10 +18,10 @@ M.defaults = {
   lang = "en",
 }
 
-M.options = {}
+M.options = vim.deepcopy(M.defaults)
 
 function M.setup(user_opts)
-  M.options = vim.tbl_deep_extend("force", M.defaults, user_opts or {})
+  M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), user_opts or {})
 
   if M.options.fetch.remote and type(M.options.fetch.remote) ~= "string" then
     M.options.fetch.remote = nil
