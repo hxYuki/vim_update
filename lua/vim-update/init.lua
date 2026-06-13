@@ -222,8 +222,10 @@ function M.start_check()
       return
     end
 
-    local status = git.check_behind_ahead(config_dir, remote, branch)
-    handle_check_result(config_dir, remote, branch, status)
+    vim.schedule(function()
+      local status = git.check_behind_ahead(config_dir, remote, branch)
+      handle_check_result(config_dir, remote, branch, status)
+    end)
   end)
 end
 
@@ -261,34 +263,36 @@ function M.execute_command()
       return
     end
 
-    local status = git.check_behind_ahead(config_dir, remote, branch)
-    if status == nil then
-      state.set_busy(false)
-      return
-    end
+    vim.schedule(function()
+      local status = git.check_behind_ahead(config_dir, remote, branch)
+      if status == nil then
+        state.set_busy(false)
+        return
+      end
 
-    if status.forked then
-      ui.notify(ui.t("update_forked"), vim.log.levels.WARN)
-      state.transition(state.State.IDLE)
-      state.set_busy(false)
-    elseif status.behind > 0 then
-      do_pull(config_dir, remote, branch)
-    elseif status.ahead > 0 then
-      state.transition(state.State.PUSHING)
-      git.push(config_dir, remote, branch, config.options.fetch.timeout, function(push_result)
-        if push_result.code == 0 then
-          ui.notify(ui.t("auto_push_success"), vim.log.levels.INFO)
-        else
-          ui.notify(ui.t("auto_push_failed"), vim.log.levels.ERROR)
-        end
+      if status.forked then
+        ui.notify(ui.t("update_forked"), vim.log.levels.WARN)
         state.transition(state.State.IDLE)
         state.set_busy(false)
-      end)
-    else
-      ui.notify(ui.t("update_noop"), vim.log.levels.INFO)
-      state.transition(state.State.IDLE)
-      state.set_busy(false)
-    end
+      elseif status.behind > 0 then
+        do_pull(config_dir, remote, branch)
+      elseif status.ahead > 0 then
+        state.transition(state.State.PUSHING)
+        git.push(config_dir, remote, branch, config.options.fetch.timeout, function(push_result)
+          if push_result.code == 0 then
+            ui.notify(ui.t("auto_push_success"), vim.log.levels.INFO)
+          else
+            ui.notify(ui.t("auto_push_failed"), vim.log.levels.ERROR)
+          end
+          state.transition(state.State.IDLE)
+          state.set_busy(false)
+        end)
+      else
+        ui.notify(ui.t("update_noop"), vim.log.levels.INFO)
+        state.transition(state.State.IDLE)
+        state.set_busy(false)
+      end
+    end)
   end)
 end
 
