@@ -1,0 +1,81 @@
+local config = require("vim-update.config")
+local state = require("vim-update.state")
+
+describe("config", function()
+  it("returns defaults when no user config", function()
+    config.setup({})
+    assert.are.same(3, config.options.retry.count)
+    assert.are.same(3, config.options.retry.interval)
+    assert.are.same(false, config.options.retry.suppress_errors)
+    assert.are.same(nil, config.options.fetch.remote)
+    assert.are.same(nil, config.options.fetch.branch)
+    assert.are.same(30000, config.options.fetch.timeout)
+    assert.are.same(true, config.options.dialog)
+    assert.are.same(nil, config.options.ahead.auto_push_delay)
+    assert.are.same("en", config.options.lang)
+  end)
+
+  it("merges user config with defaults", function()
+    config.setup({
+      dialog = false,
+      ahead = { auto_push_delay = 72 },
+      lang = "zh",
+    })
+    assert.are.same(false, config.options.dialog)
+    assert.are.same(72, config.options.ahead.auto_push_delay)
+    assert.are.same("zh", config.options.lang)
+    assert.are.same(3, config.options.retry.count)
+  end)
+
+  it("rejects invalid lang", function()
+    config.setup({ lang = "fr" })
+    assert.are.same("en", config.options.lang)
+  end)
+
+  it("rejects invalid auto_push_delay", function()
+    config.setup({ ahead = { auto_push_delay = "abc" } })
+    assert.are.same(nil, config.options.ahead.auto_push_delay)
+  end)
+
+  it("rejects negative auto_push_delay", function()
+    config.setup({ ahead = { auto_push_delay = -1 } })
+    assert.are.same(nil, config.options.ahead.auto_push_delay)
+  end)
+end)
+
+describe("state", function()
+  it("starts as IDLE and not busy", function()
+    state.transition(state.State.IDLE)
+    state.set_busy(false)
+    assert.are.same(state.State.IDLE, state.current)
+    assert.are.same(false, state.is_busy())
+  end)
+
+  it("can_start_check returns true when idle and not busy", function()
+    state.transition(state.State.IDLE)
+    state.set_busy(false)
+    assert.are.same(true, state.can_start_check())
+  end)
+
+  it("can_start_check returns false when busy", function()
+    state.transition(state.State.IDLE)
+    state.set_busy(true)
+    assert.are.same(false, state.can_start_check())
+  end)
+
+  it("can_start_check returns false when not idle", function()
+    state.transition(state.State.FETCHING)
+    state.set_busy(false)
+    assert.are.same(false, state.can_start_check())
+  end)
+
+  it("can_execute_command returns true when not busy", function()
+    state.set_busy(false)
+    assert.are.same(true, state.can_execute_command())
+  end)
+
+  it("can_execute_command returns false when busy", function()
+    state.set_busy(true)
+    assert.are.same(false, state.can_execute_command())
+  end)
+end)
