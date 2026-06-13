@@ -30,54 +30,43 @@ local function should_show_dialog()
   return config.options.dialog and not is_insert_mode()
 end
 
-local function do_fetch_with_retry(config_dir, remote, branch, attempt, callback)
-  if attempt > config.options.retry.count then
-    if not config.options.retry.suppress_errors then
-      ui.notify(ui.t("fetch_failed"), vim.log.levels.ERROR)
-    end
-    state.transition(state.State.ERROR)
-    state.set_busy(false)
-    return
-  end
-
-  state.transition(state.State.FETCHING)
-
-  git.fetch(config_dir, remote, branch, config.options.fetch.timeout, function(result)
+-- Actions (called from dialog callbacks and execute_command)
+local function do_pull(config_dir, remote, branch)
+  state.transition(state.State.PULLING)
+  git.pull_rebase(config_dir, remote, branch, config.options.fetch.timeout, function(result)
     if result.code == 0 then
-      callback(true)
+      ui.notify(ui.t("update_success"), vim.log.levels.INFO)
+      state.transition(state.State.IDLE)
+      state.set_busy(false)
     else
-      vim.defer_fn(function()
-        do_fetch_with_retry(config_dir, remote, branch, attempt + 1, callback)
-      end, config.options.retry.interval * 1000)
+      state.transition(state.State.CONFLICT)
+      ui.show_conflict_dialog(
+        function()
+          git.rebase_abort(config_dir, config.options.fetch.timeout)
+          ui.notify(ui.t("conflict_aborted"), vim.log.levels.WARN)
+          state.transition(state.State.IDLE)
+          state.set_busy(false)
+        end,
+        function()
+          ui.open_terminal()
+          state.transition(state.State.IDLE)
+          state.set_busy(false)
+        end
+      )
     end
   end)
 end
 
-local function handle_check_result(config_dir, remote, branch, status)
-  if status == nil then
-    if not config.options.retry.suppress_errors then
-      ui.notify(ui.t("fetch_failed"), vim.log.levels.ERROR)
-    end
-    state.transition(state.State.ERROR)
+local function do_view_changes(config_dir, remote, branch)
+  local log_lines = git.get_log(config_dir, remote, branch)
+  vim.schedule(function()
+    ui.view_changes(log_lines, remote, branch)
+    state.transition(state.State.IDLE)
     state.set_busy(false)
-    return
-  end
-
-  if status.forked then
-    state.transition(state.State.FORKED)
-    handle_forked(config_dir, remote, branch, status.behind, status.ahead)
-  elseif status.behind > 0 then
-    state.transition(state.State.BEHIND)
-    handle_behind(config_dir, remote, branch, status.behind)
-  elseif status.ahead > 0 then
-    state.transition(state.State.AHEAD)
-    handle_ahead(config_dir, remote, branch, status.ahead)
-  else
-    state.transition(state.State.UP_TO_DATE)
-    state.set_busy(false)
-  end
+  end)
 end
 
+-- State handlers
 local function handle_behind(config_dir, remote, branch, behind_count)
   local log_lines = git.get_log(config_dir, remote, branch)
 
@@ -161,38 +150,51 @@ local function handle_forked(config_dir, remote, branch, remote_count, local_cou
   end
 end
 
-local function do_pull(config_dir, remote, branch)
-  state.transition(state.State.PULLING)
-  git.pull_rebase(config_dir, remote, branch, config.options.fetch.timeout, function(result)
-    if result.code == 0 then
-      ui.notify(ui.t("update_success"), vim.log.levels.INFO)
-      state.transition(state.State.IDLE)
-      state.set_busy(false)
-    else
-      state.transition(state.State.CONFLICT)
-      ui.show_conflict_dialog(
-        function()
-          git.rebase_abort(config_dir, config.options.fetch.timeout)
-          ui.notify(ui.t("conflict_aborted"), vim.log.levels.WARN)
-          state.transition(state.State.IDLE)
-          state.set_busy(false)
-        end,
-        function()
-          ui.open_terminal()
-          state.transition(state.State.IDLE)
-          state.set_busy(false)
-        end
-      )
+local function handle_check_result(config_dir, remote, branch, status)
+  if status == nil then
+    if not config.options.retry.suppress_errors then
+      ui.notify(ui.t("fetch_failed"), vim.log.levels.ERROR)
     end
-  end)
+    state.transition(state.State.ERROR)
+    state.set_busy(false)
+    return
+  end
+
+  if status.forked then
+    state.transition(state.State.FORKED)
+    handle_forked(config_dir, remote, branch, status.behind, status.ahead)
+  elseif status.behind > 0 then
+    state.transition(state.State.BEHIND)
+    handle_behind(config_dir, remote, branch, status.behind)
+  elseif status.ahead > 0 then
+    state.transition(state.State.AHEAD)
+    handle_ahead(config_dir, remote, branch, status.ahead)
+  else
+    state.transition(state.State.UP_TO_DATE)
+    state.set_busy(false)
+  end
 end
 
-local function do_view_changes(config_dir, remote, branch)
-  local log_lines = git.get_log(config_dir, remote, branch)
-  vim.schedule(function()
-    ui.view_changes(log_lines, remote, branch)
-    state.transition(state.State.IDLE)
+local function do_fetch_with_retry(config_dir, remote, branch, attempt, callback)
+  if attempt > config.options.retry.count then
+    if not config.options.retry.suppress_errors then
+      ui.notify(ui.t("fetch_failed"), vim.log.levels.ERROR)
+    end
+    state.transition(state.State.ERROR)
     state.set_busy(false)
+    return
+  end
+
+  state.transition(state.State.FETCHING)
+
+  git.fetch(config_dir, remote, branch, config.options.fetch.timeout, function(result)
+    if result.code == 0 then
+      callback(true)
+    else
+      vim.defer_fn(function()
+        do_fetch_with_retry(config_dir, remote, branch, attempt + 1, callback)
+      end, config.options.retry.interval * 1000)
+    end
   end)
 end
 
